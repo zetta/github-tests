@@ -1,0 +1,76 @@
+---
+version: 2.1
+executors:
+  ec2-linux-bakery:
+    resource_class: small
+    docker:
+      - image: zettacio/baking:1.9
+    environment:
+      PACKER_DIR: bastion
+      PACKER_JSON: ""
+  publish-github-release:
+    docker:
+      - image: cibuilds/github:0.10
+workflows:
+  version: 2
+  test_and_push:
+    jobs:
+      - packer_bastion:
+          context: ec2-bakery
+      - release:
+          context: ec2-bakery
+          requires:
+            - packer_bastion
+#  build-on-schedule:
+#    jobs:
+#      - packer_bastion:
+#          context: ec2-bakery
+#    triggers:
+#      - schedule:
+#          cron: "0 12 * * 3"
+#          filters:
+#            branches:
+#              only:
+#                - main
+jobs:
+  packer_bastion:
+    executor: ec2-linux-bakery
+    steps:
+      - checkout
+      - run-pipeline
+  release:
+    executor: publish-github-release
+    steps:
+      - create-release
+commands:
+  run-pipeline:
+    description: Executes entrypoint.sh in docker container
+    steps:
+      - run:
+          name: Execute Packer
+          command: echo '{"builds":[{"name":"amazon-ebs","builder_type":"amazon-ebs","build_time":1636960581,"files":null,"artifact_id":"ap-east-1:ami-017a42909aacaba56,ap-southeast-1:ami-0fdc52eae23de3e34","packer_run_uuid":"363db360-96df-ddb3-ef9f-4399b1a568a5","custom_data":null}],"last_run_uuid":"363db360-96df-ddb3-ef9f-4399b1a568a5"}' > packer-manifest.json
+          no_output_timeout: 4h
+      - store_artifacts:
+          path: output_dir/ami_id
+      - store_artifacts:
+          path: packer-manifest.json
+      - store_artifacts:
+          path: test-report.html
+      - store_test_results:
+          path: junit.xml
+      - store_artifacts:
+          path: test-report-baseline.html
+      - store_test_results:
+          path: junit-baseline.xml
+  create-release:
+      description: Creates a release
+      steps:
+        - attach_workspace:
+            at: ./artifacts
+        - run:
+            name: "Publish Release on GitHub"
+            command: |
+              VERSION=1.1
+              ghr -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION} ./artifacts/
+
+
